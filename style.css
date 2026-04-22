@@ -1,0 +1,224 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at center, rgba(22, 28, 45, 0.2), rgba(3, 5, 10, 0.95) 68%),
+    linear-gradient(180deg, #070b14 0%, #04060a 100%);
+  color: #eff4ff;
+  font-family: "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+}
+
+canvas {
+  display: block;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.03), transparent 32%),
+    radial-gradient(circle at 50% 50%, transparent 45%, rgba(0, 0, 0, 0.55) 100%);
+  mix-blend-mode: screen;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 100% 3px;
+  opacity: 0.07;
+}
+
+.hidden {
+  display: none !important;
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(1, 2, 6, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.panel {
+  width: min(92vw, 520px);
+  padding: 24px 22px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(14, 18, 30, 0.96), rgba(7, 10, 18, 0.96));
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.55);
+  text-align: center;
+}
+
+.eyebrow {
+  display: inline-block;
+  margin-bottom: 12px;
+  padding: 7px 12px;
+  border: 1px solid rgba(124, 192, 255, 0.25);
+  border-radius: 999px;
+  color: #8fd2ff;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  background: rgba(44, 74, 110, 0.18);
+}
+
+.panel h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 0.98;
+  letter-spacing: 0.02em;
+}
+
+.panel p {
+  margin: 14px 0 0;
+  color: #d8e4ff;
+  line-height: 1.55;
+}
+
+.fineprint {
+  margin-top: 16px;
+  color: #93a4c9;
+  font-size: 0.88rem;
+}
+
+#start-btn {
+  margin-top: 18px;
+  border: none;
+  border-radius: 999px;
+  padding: 13px 22px;
+  font-weight: 800;
+  font-size: 0.98rem;
+  letter-spacing: 0.04em;
+  color: #07111e;
+  background: linear-gradient(135deg, #f6d773, #7ee4ff);
+  cursor: pointer;
+  transition: transform 120ms ease, filter 120ms ease;
+}
+
+#start-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+#start-btn:active {
+  transform: translateY(0);
+}
+
+#hud {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+#enemy-hud {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 12;
+  pointer-events: none;
+}
+
+#objective,
+#health,
+#status,
+#enemy-health {
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(7, 10, 16, 0.58);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+  color: #eef4ff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+#status {
+  color: #b9c9e8;
+  font-weight: 600;
+}
+
+#enemy-health {
+  color: #ffd2da;
+  border-color: rgba(255, 116, 136, 0.5);
+  background: rgba(28, 8, 15, 0.64);
+}
+
+#prompt {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 12;
+  min-width: min(88vw, 420px);
+  padding: 10px 14px;
+  border: 1px solid rgba(132, 221, 255, 0.34);
+  border-radius: 999px;
+  background: rgba(6, 10, 18, 0.72);
+  color: #f1f7ff;
+  text-align: center;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.3);
+}
+
+#crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 11;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow:
+    0 0 0 2px rgba(6, 12, 20, 0.65),
+    0 0 12px rgba(162, 220, 255, 0.42);
+  user-select: none;
+  pointer-events: none;
+}
+
+@media (max-width: 720px) {
+  .panel {
+    padding: 20px 18px 16px;
+  }
+
+  #hud {
+    top: 10px;
+    left: 10px;
+  }
+
+  #enemy-hud {
+    top: 10px;
+    right: 10px;
+  }
+
+  #objective,
+  #health,
+  #status,
+  #enemy-health {
+    font-size: 0.92rem;
+  }
+}
