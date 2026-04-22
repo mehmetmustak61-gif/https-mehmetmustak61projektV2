@@ -140,10 +140,20 @@ body::after {
   pointer-events: none;
 }
 
+#shop-hud {
+  position: fixed;
+  left: 14px;
+  top: 140px;
+  z-index: 12;
+  pointer-events: none;
+}
+
 #objective,
 #health,
 #status,
-#enemy-health {
+#enemy-health,
+#enemy-name,
+#shop {
   padding: 9px 11px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
@@ -163,6 +173,19 @@ body::after {
   color: #ffd2da;
   border-color: rgba(255, 116, 136, 0.5);
   background: rgba(28, 8, 15, 0.64);
+}
+
+#enemy-name {
+  margin-top: 8px;
+  color: #d8ecff;
+  border-color: rgba(114, 182, 255, 0.46);
+  background: rgba(11, 18, 31, 0.7);
+}
+
+#shop {
+  color: #d5edff;
+  border-color: rgba(94, 196, 255, 0.45);
+  background: rgba(7, 18, 30, 0.7);
 }
 
 #prompt {
@@ -215,10 +238,17 @@ body::after {
     right: 10px;
   }
 
+  #shop-hud {
+    top: 136px;
+    left: 10px;
+  }
+
   #objective,
   #health,
   #status,
-  #enemy-health {
+  #enemy-health,
+  #enemy-name,
+  #shop {
     font-size: 0.92rem;
   }
 }

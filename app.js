@@ -9,6 +9,7 @@ const objectiveEl = document.getElementById("objective");
 const healthEl = document.getElementById("health");
 const statusEl = document.getElementById("status");
 const enemyHealthEl = document.getElementById("enemy-health");
+const shopEl = document.getElementById("shop");
 const promptEl = document.getElementById("prompt");
 const crosshairEl = document.getElementById("crosshair");
 
@@ -133,6 +134,20 @@ function addPipe(x, z, length, color = 0x3b4758) {
   return pipe;
 }
 
+const DEFAULT_HAND_COLOR = 0xff8a24;
+const STARTER_LEFT_HAND_COLOR = 0xb12f45;
+const HAND_SKINS = {
+  starter: { name: "Baslangic", leftColor: STARTER_LEFT_HAND_COLOR, rightColor: DEFAULT_HAND_COLOR, cost: 0, damage: 1 },
+  blue: { name: "Mavi", color: 0x4aa6ff, cost: 20, damage: 2 },
+  green: { name: "Yesil", color: 0x38d66b, cost: 35, damage: 3 },
+  pink: { name: "Pembe", color: 0xff5fb7, cost: 50, damage: 4 },
+};
+const SHOP_HOTKEY_TO_SKIN = {
+  Digit1: "blue",
+  Digit2: "green",
+  Digit3: "pink",
+};
+
 function createHand(color, mirrored = false) {
   const group = new THREE.Group();
   const thumbSide = mirrored ? 1 : -1;
@@ -206,6 +221,7 @@ function createHand(color, mirrored = false) {
   thumbTip.rotation.z = thumbSide * 0.28;
   group.add(thumbTip);
 
+  group.userData.shellMaterial = shell;
   return group;
 }
 
@@ -240,11 +256,9 @@ function getHandSocket(side) {
   return camera.localToWorld(offset);
 }
 
-const RIGHT_HAND_COLOR = 0xff8a24;
-
 const handProjectiles = {
-  left: createHandProjectile(0xb12f45, false),
-  right: createHandProjectile(RIGHT_HAND_COLOR, true),
+  left: createHandProjectile(STARTER_LEFT_HAND_COLOR, false),
+  right: createHandProjectile(DEFAULT_HAND_COLOR, true),
 };
 
 function createRightBlast(color) {
@@ -301,16 +315,16 @@ function createRightBlast(color) {
   };
 }
 
-const rightBlast = createRightBlast(RIGHT_HAND_COLOR);
+const rightBlast = createRightBlast(DEFAULT_HAND_COLOR);
 const axisX = new THREE.Vector3(1, 0, 0);
 
 const handRig = new THREE.Group();
 handRig.position.set(0, -0.62, -0.95);
 handRig.rotation.x = -0.08;
-const leftHand = createHand(0xb12f45, false);
+const leftHand = createHand(STARTER_LEFT_HAND_COLOR, false);
 leftHand.position.set(-0.28, 0, 0.02);
 leftHand.rotation.z = 0.14;
-const rightHand = createHand(RIGHT_HAND_COLOR, true);
+const rightHand = createHand(DEFAULT_HAND_COLOR, true);
 rightHand.position.set(0.18, 0, 0.02);
 rightHand.rotation.z = -0.14;
 handRig.add(leftHand);
@@ -375,8 +389,17 @@ const state = {
   gateOpen: false,
   health: 5,
   maxHealth: 5,
+  coins: 0,
+  killReward: 20,
   power: 0,
   fuses: 0,
+  activeHandSkin: "starter",
+  ownedSkins: {
+    starter: true,
+    blue: false,
+    green: false,
+    pink: false,
+  },
   finalGateOpen: false,
   enemyMode: "patrol",
   enemyMaxHealth: 8,
@@ -392,6 +415,8 @@ const state = {
   beamTarget: new THREE.Vector3(),
   scareTimer: 0,
   catchTimer: 0,
+  verticalVelocity: 0,
+  grounded: true,
   handShake: 0,
   handShots: {
     left: null,
@@ -399,11 +424,86 @@ const state = {
   },
 };
 
+function getSkinHandColors(skinId) {
+  const skin = HAND_SKINS[skinId] ?? HAND_SKINS.starter;
+  const left = skin.leftColor ?? skin.color ?? STARTER_LEFT_HAND_COLOR;
+  const right = skin.rightColor ?? skin.color ?? DEFAULT_HAND_COLOR;
+  return { left, right };
+}
+
+function getActiveHandColor(side = "right") {
+  const colors = getSkinHandColors(state.activeHandSkin);
+  return side === "left" ? colors.left : colors.right;
+}
+
+function getActiveHandDamage() {
+  const skin = HAND_SKINS[state.activeHandSkin] ?? HAND_SKINS.starter;
+  return skin.damage ?? 1;
+}
+
+function setHandShellColor(handGroup, color) {
+  const shell = handGroup?.userData?.shellMaterial;
+  if (!shell) return;
+  shell.color.setHex(color);
+  shell.emissive.setHex(color);
+}
+
+function setProjectileHandColor(projectile, color) {
+  setHandShellColor(projectile.group, color);
+  projectile.line.material.color.setHex(color);
+}
+
+function setRightBlastColor(color) {
+  rightBlast.flameMat.color.setHex(color);
+  rightBlast.flameMat.emissive.setHex(color);
+  rightBlast.trail.material.color.setHex(color);
+  rightBlast.light.color.setHex(color);
+}
+
+function applyHandSkin(skinId) {
+  const skin = HAND_SKINS[skinId];
+  if (!skin) return;
+  const colors = getSkinHandColors(skinId);
+  state.activeHandSkin = skinId;
+  setHandShellColor(leftHand, colors.left);
+  setHandShellColor(rightHand, colors.right);
+  setProjectileHandColor(handProjectiles.left, colors.left);
+  setProjectileHandColor(handProjectiles.right, colors.right);
+  setRightBlastColor(colors.right);
+}
+
+function tryBuyOrEquipSkin(code) {
+  const skinId = SHOP_HOTKEY_TO_SKIN[code];
+  if (!skinId) return false;
+  if (!state.running || state.paused || state.over || state.win || state.caught) return true;
+
+  const skin = HAND_SKINS[skinId];
+  if (!state.ownedSkins[skinId]) {
+    if (state.coins < skin.cost) {
+      toast(`${skin.name} el icin ${skin.cost}$ lazim`);
+      playTone({ type: "square", freq: 170, freq2: 110, dur: 0.12, gain: 0.03 });
+      updateHud();
+      return true;
+    }
+    state.coins -= skin.cost;
+    state.ownedSkins[skinId] = true;
+    playSfx("pickup");
+    toast(`${skin.name} el alindi`);
+  } else {
+    toast(`${skin.name} el takildi`);
+  }
+
+  applyHandSkin(skinId);
+  updateHud();
+  return true;
+}
+
 const keys = {
   KeyW: false,
   KeyA: false,
   KeyS: false,
   KeyD: false,
+  Space: false,
   ShiftLeft: false,
   ShiftRight: false,
 };
@@ -415,6 +515,8 @@ const PLAYER_BODY_MAX_Y = PLAYER_EYE_HEIGHT + 0.05;
 const MOVE_SPEED = 4.5;
 const SPRINT_MULTIPLIER = 1.55;
 const INTERACT_DISTANCE = 3.1;
+const GRAVITY = 22;
+const JUMP_VELOCITY = 8.6;
 
 const beam = new THREE.Line(
   new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
@@ -533,82 +635,157 @@ function createMonster() {
   group.position.set(-10, 0, 0);
   scene.add(group);
 
-  const bodyMat = material(0x24344a, { roughness: 0.86, emissive: 0x090f1b, emissiveIntensity: 0.32 });
-  const accentMat = material(0x0f1827, { roughness: 0.94 });
-  const toothMat = material(0xe0e7ff, { roughness: 0.35, emissive: 0x37486a, emissiveIntensity: 0.22 });
-  const eyeMat = material(0xff2f4f, { emissive: 0xff2f4f, emissiveIntensity: 2, roughness: 0.1 });
+  const furMat = material(0x6a45a3, { roughness: 0.88, emissive: 0x271845, emissiveIntensity: 0.24 });
+  const furDarkMat = material(0x412863, { roughness: 0.9, emissive: 0x150d24, emissiveIntensity: 0.2 });
+  const clawMat = material(0x0a0d16, { roughness: 0.34, metalness: 0.25, emissive: 0x151a2e, emissiveIntensity: 0.22 });
+  const eyeShellMat = material(0x0a0b11, { roughness: 0.12 });
+  const eyeGlowMat = material(0xf2fbff, { roughness: 0.1, emissive: 0xffffff, emissiveIntensity: 1.8 });
+  const mouthRingMat = material(0x241234, { roughness: 0.5, emissive: 0x13091f, emissiveIntensity: 0.2 });
+  const mouthVoidMat = material(0x06070c, { roughness: 0.08 });
+  const bellMat = material(0xc7a146, { roughness: 0.35, metalness: 0.58, emissive: 0x7a5a1f, emissiveIntensity: 0.4 });
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.12, 2.1, 0.84), bodyMat);
-  torso.position.set(0, 1.58, 0);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 1.35, 8, 12), furMat);
+  torso.position.set(0, 2.02, -0.04);
+  torso.rotation.x = -0.14;
   group.add(torso);
 
-  const ribs = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.3, 0.66), accentMat);
-  ribs.position.set(0, 1.4, 0.02);
-  torso.add(ribs);
+  const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.58, 18, 14), furDarkMat);
+  abdomen.position.set(0, 1.9, -0.78);
+  group.add(abdomen);
 
-  const head = new THREE.Mesh(new THREE.BoxGeometry(1.18, 1.14, 1.08), bodyMat);
-  head.position.set(0, 3.05, 0.02);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.17, 0.5, 10), furDarkMat);
+  neck.position.set(0, 2.0, 0.5);
+  neck.rotation.x = Math.PI * 0.44;
+  group.add(neck);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.68, 20, 16), furMat);
+  head.position.set(0.03, 2.28, 0.86);
   group.add(head);
 
-  const crown = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.26), accentMat);
-  crown.position.set(0, 3.64, 0.05);
-  group.add(crown);
-  for (let i = -1; i <= 1; i += 1) {
-    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.22, 6), toothMat);
-    spike.position.set(i * 0.2, 3.78, 0.04);
-    group.add(spike);
-  }
+  const earL = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.55, 10), furMat);
+  earL.position.set(-0.42, 2.92, 0.7);
+  earL.rotation.z = 0.16;
+  earL.rotation.x = -0.16;
+  group.add(earL);
+  const earR = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.55, 10), furMat);
+  earR.position.set(0.46, 2.92, 0.68);
+  earR.rotation.z = -0.18;
+  earR.rotation.x = -0.15;
+  group.add(earR);
 
-  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.22, 0.18), accentMat);
-  mouth.position.set(0, 2.78, 0.64);
+  const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.11, 10, 18), mouthRingMat);
+  mouth.position.set(0.06, 2.08, 1.26);
+  mouth.rotation.x = 0.18;
   group.add(mouth);
 
-  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), eyeMat);
-  eyeL.position.set(-0.27, 3.12, 0.6);
+  const mouthVoid = new THREE.Mesh(new THREE.SphereGeometry(0.31, 16, 12), mouthVoidMat);
+  mouthVoid.position.set(0.06, 2.03, 1.3);
+  mouthVoid.scale.set(1.1, 0.86, 1.0);
+  group.add(mouthVoid);
+
+  const toothOffsets = [-0.22, -0.14, -0.06, 0.02, 0.1, 0.18];
+  for (const tx of toothOffsets) {
+    const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.11, 7), clawMat);
+    tooth.position.set(tx, 1.95, 1.34);
+    tooth.rotation.x = Math.PI;
+    group.add(tooth);
+  }
+
+  const eyeShellL = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), eyeShellMat);
+  eyeShellL.position.set(-0.25, 2.34, 1.18);
+  group.add(eyeShellL);
+  const eyeShellR = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), eyeShellMat);
+  eyeShellR.position.set(0.33, 2.34, 1.15);
+  group.add(eyeShellR);
+
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), eyeGlowMat);
+  eyeL.position.set(-0.23, 2.34, 1.33);
   group.add(eyeL);
-  const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), eyeMat);
-  eyeR.position.set(0.27, 3.12, 0.6);
+  const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), eyeGlowMat);
+  eyeR.position.set(0.35, 2.34, 1.3);
   group.add(eyeR);
 
-  const armGeo = new THREE.BoxGeometry(0.18, 2.5, 0.18);
-  const leftArm = new THREE.Mesh(armGeo, bodyMat);
-  leftArm.position.set(-0.96, 1.45, 0);
+  const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.07, 3.1, 12), furMat);
+  leftArm.position.set(-0.64, 1.16, 0.5);
+  leftArm.rotation.z = 0.07;
+  leftArm.rotation.x = 0.16;
   group.add(leftArm);
-  const rightArm = new THREE.Mesh(armGeo, bodyMat);
-  rightArm.position.set(0.96, 1.45, 0);
+  const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.07, 3.1, 12), furMat);
+  rightArm.position.set(0.72, 1.16, 0.46);
+  rightArm.rotation.z = -0.06;
+  rightArm.rotation.x = 0.2;
   group.add(rightArm);
 
   for (const arm of [leftArm, rightArm]) {
-    const clawA = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.2, 6), toothMat);
-    clawA.position.set(-0.04, -1.35, 0.12);
-    clawA.rotation.x = Math.PI * 0.6;
-    arm.add(clawA);
-    const clawB = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.2, 6), toothMat);
-    clawB.position.set(0.04, -1.35, 0.12);
-    clawB.rotation.x = Math.PI * 0.6;
-    arm.add(clawB);
+    const paw = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), furDarkMat);
+    paw.position.set(0, -1.58, 0.06);
+    arm.add(paw);
+    for (let i = -1; i <= 1; i += 1) {
+      const claw = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.14, 7), clawMat);
+      claw.position.set(i * 0.06, -1.72, 0.12);
+      claw.rotation.x = Math.PI * 0.9;
+      arm.add(claw);
+    }
   }
 
-  const legGeo = new THREE.BoxGeometry(0.26, 1.35, 0.26);
-  const legL = new THREE.Mesh(legGeo, accentMat);
-  legL.position.set(-0.32, 0.65, 0);
+  const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.065, 2.5, 12), furDarkMat);
+  legL.position.set(-0.28, 1.54, -0.98);
+  legL.rotation.z = 0.07;
+  legL.rotation.x = -0.18;
   group.add(legL);
-  const legR = new THREE.Mesh(legGeo, accentMat);
-  legR.position.set(0.32, 0.65, 0);
+  const legR = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.065, 2.5, 12), furDarkMat);
+  legR.position.set(0.26, 1.54, -1.0);
+  legR.rotation.z = -0.05;
+  legR.rotation.x = -0.22;
   group.add(legR);
 
-  const chestCore = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), eyeMat);
-  chestCore.position.set(0, 1.7, 0.46);
+  const extraLegs = [];
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.055, 2.1, 12), furDarkMat);
+    leg.position.set(side * 0.52, 1.42, -0.62);
+    leg.rotation.z = side * 0.36;
+    leg.rotation.x = -0.26;
+    leg.userData.side = side;
+    leg.userData.baseY = leg.position.y;
+    leg.userData.baseZ = leg.position.z;
+    group.add(leg);
+    const paw = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), furDarkMat);
+    paw.position.set(0, -1.06, 0.03);
+    leg.add(paw);
+    for (let i = -1; i <= 1; i += 1) {
+      const claw = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.11, 7), clawMat);
+      claw.position.set(i * 0.05, -1.17, 0.08);
+      claw.rotation.x = Math.PI * 0.92;
+      leg.add(claw);
+    }
+    extraLegs.push(leg);
+  }
+
+  const chestCore = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), bellMat);
+  chestCore.position.set(0.02, 1.86, 0.34);
   group.add(chestCore);
+  const bellRing = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.03, 8, 14), material(0x8f6c29, { roughness: 0.35, metalness: 0.45 }));
+  bellRing.position.set(0.02, 1.86, 0.34);
+  bellRing.rotation.x = Math.PI / 2;
+  group.add(bellRing);
+
+  const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.05, 1.5, 10), furDarkMat);
+  tail.position.set(0, 1.95, -1.42);
+  tail.rotation.x = 1.36;
+  group.add(tail);
+  const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), furMat);
+  tailTip.position.set(0, -0.74, 0);
+  tail.add(tailTip);
 
   const glow = new THREE.PointLight(0xff365f, 0.9, 10, 2);
-  glow.position.set(0, 2.3, 0.1);
+  glow.position.set(0.02, 1.9, 0.34);
   group.add(glow);
   return {
     group,
     pathIndex: 0,
     bob: Math.random() * Math.PI * 2,
     torso,
+    abdomen,
     head,
     mouth,
     eyeL,
@@ -617,6 +794,8 @@ function createMonster() {
     rightArm,
     legL,
     legR,
+    extraLegs,
+    tail,
     glow,
   };
 }
@@ -669,11 +848,44 @@ interactables.push(exitSwitch);
 
 wallX(43, 108, -5.5, 0x252b39);
 wallX(43, 108, 5.5, 0x252b39);
-wallZ(108, -5.5, 5.5, 0x252b39);
 
 for (let x = 46; x <= 102; x += 11) addCeilingLight(x, 1.0, 0.85, 0xd8f1ff);
 addPipe(62, 0.3, 40, 0x445163);
 addPipe(86, -0.4, 40, 0x445163);
+
+const endlessMap = {
+  builtToX: 108,
+  segmentLength: 84,
+  triggerDistance: 34,
+};
+
+function buildEndlessSegment(fromX, toX) {
+  if (toX <= fromX) return;
+  const centerX = (fromX + toX) / 2;
+  const length = toX - fromX;
+
+  addSolidBox(centerX, -0.5, 5, length, 1, 22, 0x171a23, { roughness: 1 });
+  addSolidBox(centerX, 6.18, 5, length, 0.8, 22, 0x090b10, { roughness: 0.95 });
+  wallX(fromX, toX, -5.5, 0x252b39);
+  wallX(fromX, toX, 5.5, 0x252b39);
+
+  for (let x = fromX + 5; x <= toX - 5; x += 11) {
+    addCeilingLight(x, 1.0, 0.82 + Math.random() * 0.08, 0xd8f1ff);
+  }
+
+  const pipeLength = Math.min(40, Math.max(16, length * 0.42));
+  addPipe(fromX + length * 0.28, 0.3, pipeLength, 0x445163);
+  addPipe(fromX + length * 0.72, -0.4, pipeLength, 0x445163);
+}
+
+function ensureEndlessMap() {
+  while (camera.position.x > endlessMap.builtToX - endlessMap.triggerDistance) {
+    const fromX = endlessMap.builtToX;
+    const toX = fromX + endlessMap.segmentLength;
+    buildEndlessSegment(fromX, toX);
+    endlessMap.builtToX = toX;
+  }
+}
 
 function createFuse(name, color, x, z) {
   const base = new THREE.Mesh(
@@ -772,6 +984,19 @@ const finalSwitch = {
 };
 interactables.push(finalSwitch);
 
+function disableFinalLine() {
+  state.finalGateOpen = true;
+  finalGateCollider.visible = false;
+  const finalGateData = colliders.find((entry) => entry.mesh === finalGateCollider);
+  if (finalGateData) finalGateData.enabled = false;
+  finalGateGroup.visible = false;
+  finalPanel.visible = false;
+  finalButton.visible = false;
+  finalExitLight.intensity = 0.02;
+}
+
+disableFinalLine();
+
 createFuse("Mavi sigorta", 0x59d8ff, 52, 11.2);
 createFuse("Turuncu sigorta", 0xff8c4a, 63, 11.2);
 
@@ -813,14 +1038,15 @@ function damageMonster(amount = 1) {
     state.enemyDead = true;
     state.enemyMode = "patrol";
     state.enemyRespawnTimer = state.enemyRespawnDelay;
+    state.coins += state.killReward;
     monster.group.visible = false;
-    toast("Canavar dustu. Tekrar dogacak.");
+    toast(`Canavar dustu! +${state.killReward}$`);
   }
   updateHud();
 }
 
 function updateHud() {
-  objectiveEl.textContent = `Guc: ${state.power}/3 | Sigorta: ${state.fuses}/2`;
+  objectiveEl.textContent = `Guc: ${state.power}/3 | Sigorta: ${state.fuses}/2 | Para: ${state.coins}$`;
   healthEl.textContent = `Saglik: ${state.health}/${state.maxHealth}`;
   enemyHealthEl.textContent = state.enemyDead
     ? `Canavar Cani: 0/${state.enemyMaxHealth} (Respawn ${state.enemyRespawnTimer.toFixed(1)}sn)`
@@ -828,7 +1054,13 @@ function updateHud() {
   const enemyStatus = state.enemyDead
     ? "Oldu"
     : (state.caught ? "Seni Yakaladi" : (state.enemyMode === "chase" ? "Kovaliyor" : "Dolasiyor"));
-  statusEl.textContent = `Kapi: ${state.gateOpen ? "Acik" : "Kilitli"} | Final: ${state.finalGateOpen ? "Acik" : "Kilitli"} | Canavar: ${enemyStatus}`;
+  statusEl.textContent = `Kapi: ${state.gateOpen ? "Acik" : "Kilitli"} | Final: ${state.finalGateOpen ? "Acik" : "Kilitli"} | Canavar: ${enemyStatus} | El: ${HAND_SKINS[state.activeHandSkin].name}`;
+  if (shopEl) {
+    const blueState = state.ownedSkins.blue ? (state.activeHandSkin === "blue" ? "Takili" : "Alindi") : `${HAND_SKINS.blue.cost}$`;
+    const greenState = state.ownedSkins.green ? (state.activeHandSkin === "green" ? "Takili" : "Alindi") : `${HAND_SKINS.green.cost}$`;
+    const pinkState = state.ownedSkins.pink ? (state.activeHandSkin === "pink" ? "Takili" : "Alindi") : `${HAND_SKINS.pink.cost}$`;
+    shopEl.textContent = `1 Mavi: ${blueState} | 2 Yesil: ${greenState} | 3 Pembe: ${pinkState}`;
+  }
 }
 
 function updateCrosshair() {
@@ -917,11 +1149,11 @@ function fireRightBlast() {
   const target = hit?.point?.clone() ?? camera.getWorldDirection(tmpForward).clone().multiplyScalar(24).add(camera.position);
   const hitObject = hit?.object ?? null;
   if (hitObject && isMonsterPart(hitObject)) {
-    damageMonster(1);
+    damageMonster(getActiveHandDamage());
   }
   const item = hitObject ? interactables.find((entry) => entry.mesh === hitObject) : null;
   if (item && hit.distance <= item.range + 0.75) {
-    flashBeam(RIGHT_HAND_COLOR, hit.point);
+    flashBeam(getActiveHandColor("right"), hit.point);
     item.onInteract();
   }
 
@@ -979,7 +1211,7 @@ function fireHand(side) {
   const hitObject = hit?.object ?? null;
   const item = hitObject ? interactables.find((entry) => entry.mesh === hitObject) : null;
   if (item && hit.distance <= 30) {
-    flashBeam(0xb12f45, hit.point);
+    flashBeam(getActiveHandColor("left"), hit.point);
     item.onInteract();
   }
 }
@@ -1205,7 +1437,7 @@ function resetGame() {
   state.win = false;
   state.caught = false;
   state.gateOpen = false;
-  state.finalGateOpen = false;
+  state.finalGateOpen = true;
   state.health = state.maxHealth;
   state.power = 0;
   state.fuses = 0;
@@ -1220,20 +1452,19 @@ function resetGame() {
   state.focused = null;
   state.scareTimer = 0;
   state.catchTimer = 0;
+  state.verticalVelocity = 0;
+  state.grounded = true;
   state.handShake = 0;
   state.handShots.left = null;
   state.handShots.right = null;
+  applyHandSkin(state.activeHandSkin);
 
   gateCollider.visible = true;
   const gateData = colliders.find((entry) => entry.mesh === gateCollider);
   if (gateData) gateData.enabled = true;
   gateGroup.visible = true;
   escapeLight.intensity = 0.02;
-  finalGateCollider.visible = true;
-  const finalGateData = colliders.find((entry) => entry.mesh === finalGateCollider);
-  if (finalGateData) finalGateData.enabled = true;
-  finalGateGroup.visible = true;
-  finalExitLight.intensity = 0.02;
+  disableFinalLine();
 
   for (const item of interactables) {
     if (item.type !== "core") continue;
@@ -1336,6 +1567,11 @@ function onMouseDown(event) {
 }
 
 function onKeyDown(event) {
+  if (tryBuyOrEquipSkin(event.code)) {
+    event.preventDefault();
+    return;
+  }
+
   const isMoveKey = event.code === "KeyW" || event.code === "KeyA" || event.code === "KeyS" || event.code === "KeyD";
   if (event.code in keys) keys[event.code] = true;
   if (isMoveKey) {
@@ -1346,6 +1582,21 @@ function onKeyDown(event) {
     }
     if (!state.paused && !state.over && !state.win && !state.caught && !isLocked()) {
       requestLock();
+    }
+  }
+  if (event.code === "Space") {
+    event.preventDefault();
+    if (!state.running) {
+      startSession();
+      return;
+    }
+    if (!state.paused && !state.over && !state.win && !state.caught && !isLocked()) {
+      requestLock();
+    }
+    if (state.running && !state.paused && !state.over && !state.win && !state.caught && state.grounded) {
+      state.verticalVelocity = JUMP_VELOCITY;
+      state.grounded = false;
+      playTone({ type: "triangle", freq: 240, freq2: 170, dur: 0.12, gain: 0.03 });
     }
   }
   if (event.code === "KeyE") {
@@ -1390,9 +1641,14 @@ function canOccupy(x, z) {
 function movePlayer(delta) {
   if (!state.running || state.paused || state.over || state.win || state.caught) return;
 
-  tmpForward.set(Math.sin(yaw), 0, -Math.cos(yaw));
+  camera.getWorldDirection(tmpForward);
+  tmpForward.y = 0;
+  if (tmpForward.lengthSq() < 0.0001) {
+    tmpForward.set(Math.sin(yaw), 0, -Math.cos(yaw));
+  }
+  tmpForward.normalize();
 
-  const right = new THREE.Vector3(tmpForward.z, 0, -tmpForward.x);
+  const right = tmpVec3C.set(-tmpForward.z, 0, tmpForward.x);
   const move = new THREE.Vector3();
   if (keys.KeyW) move.add(tmpForward);
   if (keys.KeyS) move.sub(tmpForward);
@@ -1406,10 +1662,19 @@ function movePlayer(delta) {
     const nextZ = camera.position.z + move.z * speed * delta;
     if (canOccupy(nextX, camera.position.z)) camera.position.x = nextX;
     if (canOccupy(camera.position.x, nextZ)) camera.position.z = nextZ;
-    camera.position.y = PLAYER_EYE_HEIGHT;
   }
 
-  if (state.finalGateOpen && camera.position.x > 106.8) winGame();
+  if (!state.grounded || state.verticalVelocity !== 0) {
+    state.verticalVelocity -= GRAVITY * delta;
+    camera.position.y += state.verticalVelocity * delta;
+    if (camera.position.y <= PLAYER_EYE_HEIGHT) {
+      camera.position.y = PLAYER_EYE_HEIGHT;
+      state.verticalVelocity = 0;
+      state.grounded = true;
+    }
+  } else if (camera.position.y !== PLAYER_EYE_HEIGHT) {
+    camera.position.y = PLAYER_EYE_HEIGHT;
+  }
 }
 
 function hasLineOfSight(from2D, to2D) {
@@ -1472,46 +1737,55 @@ function updateEnemy(delta) {
   const sway = Math.sin(now * 6) * 0.04;
   const lean = chaseWeight * 0.22;
 
-  monster.group.position.y = 0.03 + Math.sin(now * 5 + monster.bob) * 0.04;
-  monster.group.scale.setScalar(1 + chaseWeight * 0.08 + Math.sin(now * 2.5) * 0.01);
-  monster.group.rotation.z = Math.sin(now * 3.2) * 0.03 * (0.4 + chaseWeight);
-  monster.torso.rotation.x = -0.03 - lean * 0.5 + Math.sin(now * 4.8) * 0.02;
-  monster.torso.rotation.z = Math.sin(now * 5.4) * 0.02;
-  monster.head.rotation.x = 0.05 + Math.sin(now * 8.2) * 0.04 - lean * 0.35;
-  monster.head.rotation.y = Math.sin(now * 3.6) * 0.08;
-  monster.head.rotation.z = Math.sin(now * 7.4) * 0.05 * chaseWeight;
-  monster.mouth.scale.y = 1 + Math.max(0, Math.sin(now * 14 + 1.4)) * (0.25 + chaseWeight * 0.35);
-  monster.mouth.position.z = 0.64 + Math.max(0, Math.sin(now * 11.2)) * 0.06;
-  monster.eyeL.scale.setScalar(1 + Math.max(0, Math.sin(now * 18)) * 0.12);
-  monster.eyeR.scale.setScalar(1 + Math.max(0, Math.sin(now * 18 + 0.7)) * 0.12);
-  monster.eyeL.position.y = 3.12 + Math.sin(now * 16) * 0.04;
-  monster.eyeR.position.y = 3.12 + Math.sin(now * 16 + 0.7) * 0.04;
-  monster.leftArm.rotation.x = 0.18 + Math.sin(stride) * (0.18 + chaseWeight * 0.22);
-  monster.rightArm.rotation.x = -0.18 - Math.sin(stride + Math.PI) * (0.18 + chaseWeight * 0.22);
-  monster.leftArm.rotation.z = -0.08 + sway - chaseWeight * 0.08;
-  monster.rightArm.rotation.z = 0.08 - sway + chaseWeight * 0.08;
-  monster.leftArm.position.y = 1.45 + Math.sin(stride + 0.5) * (0.08 + chaseWeight * 0.08);
-  monster.rightArm.position.y = 1.45 + Math.sin(stride + Math.PI + 0.5) * (0.08 + chaseWeight * 0.08);
-  monster.legL.rotation.x = Math.sin(stride + Math.PI) * 0.18;
-  monster.legR.rotation.x = Math.sin(stride) * 0.18;
-  monster.legL.position.y = 0.65 + Math.max(0, Math.sin(stride + Math.PI)) * 0.06;
-  monster.legR.position.y = 0.65 + Math.max(0, Math.sin(stride)) * 0.06;
-  monster.glow.intensity = 0.55 + chaseWeight * 0.55 + Math.sin(now * 10) * 0.08;
-  monster.glow.distance = 7.5 + chaseWeight * 1.8;
-
-  if (dist < 1.08) {
-    startCatchScare();
-    return;
+  monster.group.position.y = 0.03 + Math.sin(now * 4 + monster.bob) * 0.05;
+  monster.group.scale.setScalar(1 + chaseWeight * 0.07 + Math.sin(now * 2.4) * 0.008);
+  monster.group.rotation.z = Math.sin(now * 2.2) * 0.028 * (0.5 + chaseWeight);
+  monster.torso.position.y = 2.02 + Math.sin(now * 5.2 + monster.bob) * 0.06;
+  monster.torso.rotation.x = -0.14 - lean * 0.3 + Math.sin(now * 3.8) * 0.04;
+  monster.torso.rotation.z = Math.sin(now * 4.2) * 0.03;
+  monster.abdomen.scale.setScalar(1 + Math.sin(now * 2.2) * 0.025);
+  monster.head.position.y = 2.28 + Math.sin(now * 8.2) * 0.05;
+  monster.head.position.z = 0.86 + Math.sin(now * 6.8) * 0.03;
+  monster.head.rotation.x = 0.06 + Math.sin(now * 7.5) * 0.08 - lean * 0.2;
+  monster.head.rotation.y = Math.sin(now * 3.6) * 0.19;
+  monster.head.rotation.z = Math.sin(now * 7.8) * 0.05 * (0.6 + chaseWeight);
+  monster.mouth.scale.y = 1 + Math.max(0, Math.sin(now * 12.5 + 1.2)) * (0.24 + chaseWeight * 0.32);
+  monster.mouth.position.z = 1.26 + Math.max(0, Math.sin(now * 9.5)) * 0.04;
+  monster.eyeL.scale.setScalar(1 + Math.max(0, Math.sin(now * 17)) * 0.2);
+  monster.eyeR.scale.setScalar(1 + Math.max(0, Math.sin(now * 17 + 0.9)) * 0.2);
+  monster.eyeL.position.y = 2.34 + Math.sin(now * 15) * 0.03;
+  monster.eyeR.position.y = 2.34 + Math.sin(now * 15 + 0.8) * 0.03;
+  monster.leftArm.rotation.x = 0.16 + Math.sin(stride) * (0.3 + chaseWeight * 0.18);
+  monster.rightArm.rotation.x = 0.2 - Math.sin(stride + Math.PI) * (0.3 + chaseWeight * 0.18);
+  monster.leftArm.rotation.z = 0.07 + sway * 0.4 - chaseWeight * 0.04;
+  monster.rightArm.rotation.z = -0.06 - sway * 0.4 + chaseWeight * 0.04;
+  monster.leftArm.position.y = 1.16 + Math.sin(stride + 0.2) * (0.08 + chaseWeight * 0.06);
+  monster.rightArm.position.y = 1.16 + Math.sin(stride + Math.PI + 0.2) * (0.08 + chaseWeight * 0.06);
+  monster.legL.rotation.x = -0.18 + Math.sin(stride + Math.PI) * 0.22;
+  monster.legR.rotation.x = -0.22 + Math.sin(stride) * 0.22;
+  monster.legL.position.y = 1.54 + Math.max(0, Math.sin(stride + Math.PI)) * 0.04;
+  monster.legR.position.y = 1.54 + Math.max(0, Math.sin(stride)) * 0.04;
+  if (monster.extraLegs) {
+    for (let i = 0; i < monster.extraLegs.length; i += 1) {
+      const leg = monster.extraLegs[i];
+      const phase = stride * 0.7 + i * 0.65;
+      leg.rotation.x = -0.26 + Math.sin(phase) * (0.2 + chaseWeight * 0.1);
+      leg.position.y = leg.userData.baseY + Math.max(0, Math.sin(phase + Math.PI / 2)) * 0.04;
+      leg.position.z = leg.userData.baseZ + Math.sin(now * 2.8 + i) * 0.014;
+    }
   }
+  if (monster.tail) {
+    monster.tail.rotation.y = Math.sin(now * 4.2) * 0.22;
+    monster.tail.rotation.x = 1.36 + Math.sin(now * 5.5) * 0.08;
+  }
+  monster.glow.intensity = 0.72 + chaseWeight * 0.58 + Math.sin(now * 10.5) * 0.1;
+  monster.glow.distance = 8.6 + chaseWeight * 2.1;
 
   if (state.enemyMode === "chase" && dist < 3.2 && state.scareTimer <= 0) triggerScare();
 
   if (dist < 1.35) {
-    state.enemyDamageCooldown += delta;
-    if (state.enemyDamageCooldown > 0.45) {
-      state.enemyDamageCooldown = 0;
-      addDamage(1);
-    }
+    startCatchScare();
+    return;
   } else {
     state.enemyDamageCooldown = Math.max(0, state.enemyDamageCooldown - delta * 1.5);
   }
@@ -1544,6 +1818,7 @@ function animate() {
 
   if (state.running && !state.paused && !state.over && !state.win && !state.caught) {
     movePlayer(delta);
+    ensureEndlessMap();
     updateEnemy(delta);
   }
 
